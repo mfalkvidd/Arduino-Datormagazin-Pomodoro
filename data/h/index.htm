@@ -1,0 +1,57 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pomodoro</title>
+
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
+    <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/html5shiv/3.7.2/html5shiv.min.js"></script>
+      <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+    <![endif]-->
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
+<link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="theme-color" content="#ffffff">
+</head>
+<body>
+<img src="dmz_logo.png" style="vertical-align:middle; width:100%; max-width:30em">
+<h1>Pomodoro</h1>
+<div class="progress">
+  <div id="progressbar" class="progress-label progress-bar progress-bar-info progress-bar-striped active" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
+  </div>
+</div>
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+    <script src="js/jquery-1.12.4.min.js"></script>
+    <!-- Include all compiled plugins (below), or include individual files as needed -->
+    <script src="js/bootstrap.min.js"></script>
+<div class="footer">
+Tomato logo by José Campos from the Noun Project used under Creative Commons
+</div>
+<script>
+$( document ).ready(function() {
+function request(){
+  $.ajax("/gettime", {
+    success: function(jsondata){
+      console.log(jsondata.procent);
+      var progressbar = $( "#progressbar" );
+      progressbar.attr("style", "width: " + jsondata.procent + "%");
+      progressbar.text(jsondata.procent + "%" );
+    },
+    complete: function(){
+      setTimeout(request,1000);
+    }
+  });
+}
+request();
+});
+</script>
+</body>
+</html>
