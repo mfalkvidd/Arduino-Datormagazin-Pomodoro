@@ -9,9 +9,9 @@
 
 FASTLED_USING_NAMESPACE
 #define SPEEDUP 60
-#define DATA_PIN    5
-#define BUTTON_PIN 2
-#define BUZZER_PIN 4
+#define DATA_PIN 5 // D1
+#define BUTTON_PIN 2 // D4
+#define BUZZER_PIN 4 //D2
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
 #define NUM_LEDS    24
