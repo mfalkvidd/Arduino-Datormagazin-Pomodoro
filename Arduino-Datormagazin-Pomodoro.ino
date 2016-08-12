@@ -204,7 +204,7 @@ void printSystemInfo() {
 }
 
 void setClockFromNTP() {
-  configTime(2 * 3600, 0, "gbg1.ntp.se", "gbg1.ntp.se");
+  configTime(2 * 3600, 0, "ntp.se"); // will direct the client to the closest available server (in Sweden)
   while (!time(nullptr)) {
     delay(10);
   }
