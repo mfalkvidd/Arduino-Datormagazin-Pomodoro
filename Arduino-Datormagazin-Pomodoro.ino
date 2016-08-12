@@ -122,14 +122,12 @@ unsigned long elapsed_time_millis() {
 }
 
 void web_get_time() {
-  String json;
-  if (running) {
-    json = "{\"procent\":\"" + String(elapsed_time_millis() * 100.0 / POMODORO_LENGTH) + "\"}";
-  } else {
-    json = "{\"procent\":\"0\"}";
-  }
   server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  server.send(200, "application/json", json);
+  if (running) {
+    server.send(200, "application/json", "{\"procent\":\"" + String(elapsed_time_millis() * 100.0 / POMODORO_LENGTH) + "\"}");
+  } else {
+    server.send(200, "application/json", "{\"procent\":\"0\"}");
+  }
 }
 
 void start_pomodoro() {
