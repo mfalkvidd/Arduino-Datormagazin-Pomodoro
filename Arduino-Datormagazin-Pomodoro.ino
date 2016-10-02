@@ -7,18 +7,28 @@
 #include <FS.h>
 #include <Bounce2.h>
 #include <time.h>
+#include <TimerFreeTone.h>
+#include "httpUpdateUtils.h"
+
+// For http update
+#define OTA_SERVER_FINGERPRINT "A2:88:84:53:70:02:A7:11:2A:F7:94:2A:A6:4E:A3:A1:A9:76:AE:2E" // Update this to the SHA1 fingerprint of your certificate
+#define OTA_SERVER_URL "https://ota.falkviddholding.com/esp/get.php?product=pomodoro" // Update this to the URL of your update web server
+#define OTA_CURRENT_FIRMWARE_VERSION "v0.0.7"
+#define IDLE_TIME (60*60*1000) // 1 hour idle time before checking update
+#define MAX_VERSION_LEN 20
 
 FASTLED_USING_NAMESPACE
 #define SPEEDUP 1
-#define DATA_PIN 5 // D1
-#define BUTTON_PIN 16 // D0
+#define MAX_NTP_TRIES 10
+#define DATA_PIN 14 // D5
+#define BUTTON_PIN 5 // D1
 #define BUZZER_PIN 4 //D2
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
 #define NUM_LEDS    24
 CRGB leds[NUM_LEDS];
 
-#define BRIGHTNESS 20
+#define BRIGHTNESS 18
 #define FRAMES_PER_SECOND 120
 #define POMODORO_LENGTH (25*60*1000/SPEEDUP)
 uint8_t gHue = 0;
@@ -28,9 +38,9 @@ Bounce debouncer = Bounce();
 const char* esp_ssid = "Pomodoro";
 const char* esp_password = "pomodoro";
 
-unsigned long start_time;
+unsigned long start_time = 0;
+unsigned long last_update_check = 0;
 bool running = false;
-bool first = true; // Workaround for the weird behavior the touch button experience at first start.
 
 ESP8266WebServer server(80);
 WiFiManager wifiManager;
@@ -52,18 +62,20 @@ void setup() {
 
   wifiManager.autoConnect(esp_ssid, esp_password);
   paintLeds(1, CRGB::DarkGreen, CRGB::DarkBlue, CRGB::DarkBlue);
-  Serial.println("wifiManager started");
+  Serial.println("wifiManager returned");
   setClockFromNTP();
+  SPIFFS.begin();
   printSystemInfo();
   paintLeds(2, CRGB::DarkGreen, CRGB::DarkBlue, CRGB::DarkBlue);
 
   MDNS.begin("pomodoro"); // Makes the device accessible through http://pomodoro.local
   MDNS.addService("http", "tcp", 80);
   paintLeds(3, CRGB::DarkGreen, CRGB::DarkBlue, CRGB::DarkBlue);
-  SPIFFS.begin();
   paintLeds(4, CRGB::DarkGreen, CRGB::DarkBlue, CRGB::DarkBlue);
 
   server.on ("/gettime", web_get_time);
+  server.on ("/updatecheck", checkUpdates); // Go to https://pomodoro.local/updatecheck to manually trigger an update
+  server.on ("/version", displayVersion); // Go to https://pomodoro.local/version to see current versions of firmware and spiffs
   server.serveStatic("/", SPIFFS, "/h/", "max-age=3600");
   server.begin();
   paintLeds(5, CRGB::DarkGreen, CRGB::DarkBlue, CRGB::DarkBlue);
@@ -72,12 +84,8 @@ void setup() {
 void loop() {
   server.handleClient();
   if (debouncer.update()) { // Only read if the state changed from last time
-    if (debouncer.rose() && !first) {
-      Serial.println("Rose");
+    if (debouncer.rose()) {
       start_pomodoro();
-    } else {
-      first = false;
-      Serial.println("Did not rise");
     }
   }
 
@@ -85,6 +93,13 @@ void loop() {
     fill_rainbow(leds, NUM_LEDS, gHue, 7);
     FastLED.delay(1000 / FRAMES_PER_SECOND);
     FastLED.show();
+    if (elapsed_time_millis() > IDLE_TIME && (millis() - last_update_check) > IDLE_TIME) {
+      // Run update check if the device has been unused for at least IDLE_TIME, and at least IDLE_TIME milliseconds has passed since last check
+      last_update_check = millis();
+      Serial.println("Checkig for updates");
+      httpUpdateUtils updater(OTA_SERVER_URL, OTA_SERVER_FINGERPRINT, OTA_CURRENT_FIRMWARE_VERSION, get_spiffs_version().c_str());
+      updater.httpUpdate();
+    }
   } else {
     byte level = abs(128 - gHue) * 1.33;
     paintLeds((elapsed_time_millis() * NUM_LEDS / POMODORO_LENGTH), 0x32FF32, CRGB(40 + level, 255 - level, 40), CRGB::DarkRed);
@@ -106,6 +121,7 @@ void paintAllLeds(CRGB color) {
 }
 
 void paintLeds(byte divider, CRGB firstColor, CRGB secondColor, CRGB thirdColor) {
+  //TODO: Use fill_solid( leds, NUM_LEDS, CRGB::Red); instead of looping
   byte led;
   for (led = 0; led < divider; led++) {
     leds[led] = firstColor;
@@ -143,10 +159,11 @@ void start_pomodoro() {
 
 void stop_pomodoro() {
   running = false;
-  tone(BUZZER_PIN, 1000, 100);
+  //tone(BUZZER_PIN, 1000, 100);
   Serial.print(F("Pomodoro stopped at "));
   time_t now = time(nullptr);
   Serial.print(ctime(&now));
+  playTone();
   FastLED.delay(100);
   noTone(BUZZER_PIN);
 }
@@ -194,6 +211,11 @@ void printSystemInfo() {
   Serial.println(WiFi.subnetMask());
   Serial.print(F("Gateway               : "));
   Serial.println(WiFi.gatewayIP());
+  Serial.println(F("----- Firmware versions --------------------------------------"));
+  Serial.print(F("Sketch                : "));
+  Serial.println(OTA_CURRENT_FIRMWARE_VERSION);
+  Serial.print(F("Spiffs                : "));
+  Serial.println(get_spiffs_version());
 #ifdef _TIME_H_
   Serial.println(F("----- Time details -------------------------------------------"));
   Serial.print(F("Time                  : "));
@@ -205,7 +227,43 @@ void printSystemInfo() {
 
 void setClockFromNTP() {
   configTime(2 * 3600, 0, "ntp.se"); // will direct the client to the closest available server (in Sweden)
-  while (!time(nullptr)) {
-    delay(10);
+  byte tries = 0;
+  while (!time(nullptr) && tries < MAX_NTP_TRIES) {
+    Serial.println("waiting for ntp sync");
+    delay(100);
+    tries++;
   }
+}
+
+void playTone() {
+  int melody[] = { 262, 196, 196, 220, 196, 0, 247, 262 };
+  int duration[] = { 250, 125, 125, 250, 250, 250, 250, 250 };
+  for (int thisNote = 0; thisNote < 8; thisNote++) { // Loop through the notes in the array.
+    TimerFreeTone(BUZZER_PIN, melody[thisNote], duration[thisNote]); // Play melody[thisNote] for duration[thisNote].
+    delay(50); // Short delay between notes.
+  }
+}
+
+void checkUpdates() {
+  char spiffs_version[MAX_VERSION_LEN];
+  get_spiffs_version().toCharArray(spiffs_version, sizeof(spiffs_version));
+  httpUpdateUtils updater(OTA_SERVER_URL, OTA_SERVER_FINGERPRINT, OTA_CURRENT_FIRMWARE_VERSION, spiffs_version);
+  String newVer = updater.httpUpdate();
+  server.send(200, "text/plain", newVer);
+}
+
+void displayVersion() {
+  server.send(200, "text/plain", "Sketch: " + String(OTA_CURRENT_FIRMWARE_VERSION) + "\nSpiffs: " + String(get_spiffs_version()) + "\n");
+}
+
+String get_spiffs_version() {
+  File f = SPIFFS.open("/version.txt", "r");
+  String versionString = "v0.0.0";
+  if (!f) {
+    Serial.println("Unable to read version.txt. Returning default value.");
+    return versionString;
+  }
+  versionString = f.readStringUntil('\n');
+  f.close();
+  return versionString;
 }
